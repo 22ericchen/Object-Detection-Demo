@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Object Detection Demo | Grimoire</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- TailwindCSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- TensorFlow.js -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.16.0/dist/tf.min.js"></script>
+  <!-- COCO-SSD Model -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
+</head>
+<body class="bg-gradient-to-br from-gray-900 via-blue-950 to-gray-800 min-h-screen flex flex-col items-center p-4">
+  <div class="max-w-lg w-full bg-white bg-opacity-90 shadow-2xl rounded-2xl p-6 mt-8">
+    <h1 class="text-3xl font-bold mb-2 text-center text-blue-700">Object Detection Demo</h1>
+    <p class="text-center text-gray-700 mb-4">Upload a photo and see what objects AI can find! Powered by TensorFlow.js and COCO-SSD.</p>
+    <input id="imageUpload" type="file" accept="image/*" class="block w-full mb-4" />
+    <div id="canvasWrapper" class="flex justify-center items-center bg-gray-200 rounded-lg overflow-hidden" style="min-height: 320px;">
+      <canvas id="imageCanvas" class="max-w-full max-h-[400px]"></canvas>
+    </div>
+    <div id="summary" class="mt-4"></div>
+    <div id="errorMsg" class="text-red-500 mt-2 text-center"></div>
+    <button id="resetBtn" class="mt-4 w-full bg-blue-600 text-white font-semibold py-2 rounded-xl shadow hover:bg-blue-700 transition hidden">Try Another Image</button>
+  </div>
+  <footer class="mt-10 text-gray-400 text-xs text-center">
+    &copy; 2025 Grimoire | All AI runs locally in your browser.
+  </footer>
+
+  <script>
+    let model;
+    const fileInput = document.getElementById('imageUpload');
+    const canvas = document.getElementById('imageCanvas');
+    const ctx = canvas.getContext('2d');
+    const summaryDiv = document.getElementById('summary');
+    const errorMsg = document.getElementById('errorMsg');
+    const resetBtn = document.getElementById('resetBtn');
+    const canvasWrapper = document.getElementById('canvasWrapper');
+
+    // Set max image size for performance
+    const MAX_WIDTH = 512;
+    const MAX_HEIGHT = 400;
+
+    function showError(msg) {
+      errorMsg.textContent = msg;
+    }
+    function clearError() {
+      errorMsg.textContent = "";
+    }
+
+    function showSummary(predictions) {
+      if (!predictions.length) {
+        summaryDiv.innerHTML = `<p class="text-gray-700 text-center">No objects found. Try a different photo!</p>`;
+        return;
+      }
+      // Count occurrences
+      const counts = {};
+      predictions.forEach(p => {
+        counts[p.class] = (counts[p.class] || 0) + 1;
+      });
+      summaryDiv.innerHTML = `
+        <h2 class="font-bold mb-1 text-gray-800 text-center">Detected Objects:</h2>
+        <ul class="flex flex-wrap gap-2 justify-center">
+          ${Object.entries(counts).map(([name, count]) => `<li class="bg-blue-100 text-blue-800 rounded-lg px-3 py-1">${name} <span class="font-semibold">x${count}</span></li>`).join('')}
+        </ul>
+      `;
+    }
+
+    function resetUI() {
+      canvas.width = canvas.height = 0;
+      summaryDiv.innerHTML = '';
+      clearError();
+      resetBtn.classList.add('hidden');
+      fileInput.value = '';
+      canvasWrapper.classList.remove('border-4', 'border-green-500');
+    }
+
+    async function loadModel() {
+      showError("Loading model...");
+      try {
+        model = await cocoSsd.load();
+        clearError();
+      } catch (e) {
+        showError("Failed to load the model. Try refreshing the page.");
+      }
+    }
+
+    function drawDetections(img, predictions) {
+      // Set canvas to image size, scale if needed
+      let {width, height} = img;
+      let scale = Math.min(MAX_WIDTH / width, MAX_HEIGHT / height, 1);
+      width = Math.round(width * scale);
+      height = Math.round(height * scale);
+      canvas.width = width;
+      canvas.height = height;
+      ctx.clearRect(0, 0, width, height);
+      ctx.drawImage(img, 0, 0, width, height);
+
+      // Draw boxes
+      predictions.forEach(pred => {
+        const [x, y, w, h] = pred.bbox.map((v, i) => i < 2 ? v * scale : v * scale);
+        ctx.strokeStyle = "#22d3ee";
+        ctx.lineWidth = 3;
+        ctx.strokeRect(x, y, w, h);
+
+        // Draw label background
+        ctx.font = "bold 18px sans-serif";
+        const label = `${pred.class} (${(pred.score*100).toFixed(1)}%)`;
+        const textWidth = ctx.measureText(label).width + 10;
+        ctx.fillStyle = "rgba(34, 211, 238, 0.9)";
+        ctx.fillRect(x, y - 24, textWidth, 24);
+
+        // Draw label text
+        ctx.fillStyle = "#1e293b";
+        ctx.fillText(label, x + 5, y - 6);
+      });
+    }
+
+    // Handle image upload
+    fileInput.addEventListener('change', async (e) => {
+      resetUI();
+      clearError();
+      const file = e.target.files[0];
+      if (!file) return;
+      if (!model) await loadModel();
+
+      const img = new window.Image();
+      img.onload = async () => {
+        try {
+          // Run detection
+          showError("Detecting objects...");
+          const predictions = await model.detect(img);
+          clearError();
+          drawDetections(img, predictions);
+          showSummary(predictions);
+          resetBtn.classList.remove('hidden');
+          canvasWrapper.classList.add('border-4', 'border-green-500');
+        } catch (err) {
+          showError("Detection failed. Try another image.");
+        }
+      };
+      img.onerror = () => showError("Could not load the image file. Try a different one.");
+      img.src = URL.createObjectURL(file);
+    });
+
+    resetBtn.addEventListener('click', resetUI);
+
+    // On load: load the model in background for faster first use
+    loadModel();
+  </script>
+</body>
+</html>
